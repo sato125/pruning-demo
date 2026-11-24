@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Interactieve demo van Kashif Neils onderzoek naar kwaliteitsverlies door LLM-pruning.">
+  <title>Hoeveel antwoordkwaliteit kost pruning?</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --background: #10171b;
+      --panel: #182227;
+      --line: #33464b;
+      --ink: #edf5f2;
+      --muted: #a9bfba;
+      --accent: #9af4ce;
+      --amber: #ffce8b;
+      font: 16px/1.55 system-ui, sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-padding-top: 1.25rem; }
+    body { margin: 0; color: var(--ink); background: var(--background); }
+    button, select, input { font: inherit; }
+    a { color: var(--accent); text-underline-offset: .2em; }
+    a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible {
+      outline: 2px solid var(--amber); outline-offset: 4px;
+    }
+    .wrap { max-width: 1160px; margin-inline: auto; padding-inline: clamp(1rem, 3vw, 2rem); }
+    .hero { padding-block: clamp(2.5rem, 7vw, 5rem) 2rem; }
+    h1 { margin: 0; max-width: 16ch; font-size: clamp(2.3rem, 6vw, 5rem); line-height: .99; letter-spacing: -.06em; }
+    .lede { max-width: 55ch; color: var(--muted); margin: 1rem 0 0; font-size: 1.09rem; }
+    h2 { font-size: clamp(1.5rem, 3vw, 2.2rem); line-height: 1.14; letter-spacing: -.037em; margin: 0; }
+    h3 { margin: 0; font-size: 1rem; }
+    .panel, .answer, .method { border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+    .workbench { display: grid; grid-template-columns: minmax(0, 1fr) minmax(17rem, .45fr); overflow: hidden; }
+    .plot, .controls { min-width: 0; padding: clamp(1rem, 2.7vw, 1.6rem); }
+    .plot p, .controls p { margin: .45rem 0 0; }
+    .controls { border-left: 1px solid var(--line); background: #141d21; }
+    .chart { display: block; width: 100%; min-height: 168px; margin-top: .8rem; }
+    .legend { display: flex; flex-wrap: wrap; gap: .35rem 1rem; color: var(--muted); font-size: .85rem; }
+    .legend span { display: inline-flex; align-items: center; gap: .4rem; }
+    .legend i { width: .6rem; height: .6rem; border: 2px solid var(--accent); border-radius: 50%; }
+    .legend .selection { background: var(--amber); border-color: var(--amber); }
+    .meta, .muted, .legend { color: var(--muted); }
+    .meta { font-size: .9rem; }
+    label { display: block; font-size: .9rem; font-weight: 650; }
+    select { width: 100%; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: .6rem .5rem; margin-top: .3rem; }
+    .range-label { margin-top: 1.15rem; display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; }
+    output { color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    input[type=range] { width: 100%; accent-color: var(--accent); margin: .55rem 0 0; cursor: pointer; }
+    .limits { display: flex; justify-content: space-between; gap: .5rem; font-variant-numeric: tabular-nums; }
+    .snap { margin-top: .65rem; padding: 0; border: 0; color: var(--accent); background: transparent; text-decoration: underline; text-underline-offset: .2em; font-size: .9rem; cursor: pointer; }
+    .result { border-top: 1px solid var(--line); margin-top: 1.1rem; padding-top: 1rem; }
+    .result strong { display: block; color: var(--accent); font-size: clamp(1.85rem, 4vw, 2.7rem); line-height: 1.15; font-variant-numeric: tabular-nums; letter-spacing: -.045em; }
+    .detail { min-height: 3.2em; }
+    .motion { padding: clamp(1rem, 2.7vw, 1.6rem); }
+    .motion-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(14rem, 1fr); align-items: center; gap: 1.25rem; }
+    .motion-visual { display: block; width: 100%; max-height: 244px; min-height: 134px; background: #141d21; border: 1px solid var(--line); border-radius: 12px; }
+    .motion-copy p { margin: .55rem 0 .85rem; }
+    .play { padding: .5rem .85rem; background: var(--accent); color: var(--background); border: 1px solid var(--accent); border-radius: 8px; font-weight: 700; cursor: pointer; }
+    .play:disabled { opacity: .48; cursor: default; }
+    .motion-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .85rem; }
+    .rotation { border: 0; padding: .3rem 0; background: transparent; color: var(--muted); text-decoration: underline; text-underline-offset: .2em; cursor: pointer; }
+    section + section { margin-top: clamp(2rem, 5vw, 3.4rem); }
+    .section-note { margin: .5rem 0 1rem; color: var(--muted); max-width: 68ch; }
+    .answer-grid, .method-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem; }
+    .answer, .method { padding: 1rem; min-width: 0; }
+    blockquote { margin: .8rem 0; font-size: 1.09rem; }
+    .answer p, .method p { margin: .55rem 0 0; color: var(--muted); }
+    .answer .score { color: var(--accent); font-weight: 650; }
+    .answer .loss { color: var(--amber); }
+    .question { font-weight: 650; }
+    details { margin-top: 1rem; }
+    summary { cursor: pointer; width: fit-content; color: var(--accent); }
+    footer { border-top: 1px solid var(--line); margin-top: 3rem; padding-block: 1.25rem; color: var(--muted); }
+    @media (max-width: 720px) {
+      .workbench, .motion-grid, .answer-grid, .method-grid { grid-template-columns: 1fr; }
+      .controls { border-left: 0; border-top: 1px solid var(--line); }
+      .chart { min-height: 130px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="hero">
+      <h1>Hoeveel antwoordkwaliteit kost pruning?</h1>
+      <p class="lede">Bij pruning haal je delen van een taalmodel weg. In dit onderzoek schat ik vóór die ingreep hoeveel antwoordkwaliteit het model verliest.</p>
+    </div>
+
+    <section id="demo" aria-labelledby="demo-heading">
+      <div class="panel workbench">
+        <div class="plot">
+          <h2 id="demo-heading">Antwoordkwaliteit per pruningniveau</h2>
+          <p id="protocol" class="meta"></p>
+          <svg id="chart" class="chart" viewBox="0 0 650 280" role="img" aria-labelledby="chart-title">
+            <title id="chart-title">Antwoord-F1 per pruningniveau</title>
+          </svg>
+          <div class="legend"><span><i></i> Gemeten</span><span><i class="selection"></i> Jouw keuze</span></div>
+        </div>
+        <div class="controls">
+          <label for="profile">Model en pruningmethode</label>
+          <select id="profile"></select>
+          <label class="range-label" for="level"><span>Pruningpercentage</span><output id="percentage" for="level"></output></label>
+          <input id="level" type="range" min="0" aria-describedby="unit">
+          <div class="limits meta"><span>0%</span><span id="maximum"></span></div>
+          <p id="unit" class="meta"></p>
+          <button type="button" class="snap" id="snap">Toon dichtstbijzijnde meting</button>
+          <div class="result" aria-live="polite">
+            <span class="meta" id="source"></span>
+            <strong id="loss"></strong>
+            <p id="scores"></p>
+            <p id="basis" class="meta detail"></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="animatie" class="panel motion" aria-labelledby="motion-heading">
+      <div class="motion-grid">
+        <svg id="pruning-scene" class="motion-visual" viewBox="0 0 640 264" role="img" aria-labelledby="scene-title">
+          <title id="scene-title">Schematische pruninganimatie</title>
+        </svg>
+        <div class="motion-copy">
+          <h2 id="motion-heading">Wat verandert er in het model?</h2>
+          <p id="motion-description" class="meta"></p>
+          <div class="motion-actions">
+            <button type="button" class="play" id="play">Speel pruning af</button>
+            <button type="button" class="rotation" id="rotation" hidden>Pauzeer rotatie</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="voorbeeld" aria-labelledby="example-heading">
+      <h2 id="example-heading">Wat verandert er in een antwoord?</h2>
+      <p class="section-note">Een opgeslagen passagevraag uit de pilot met Qwen2.5-0.5B Instruct. Bij dezelfde vraag geeft het geprunde model een gebeurtenis uit 1978, terwijl de gevraagde oprichting in 1977 was.</p>
+      <p id="example-question" class="question" lang="en"></p>
+      <div class="answer-grid">
+        <article class="answer">
+          <h3>Ongeprund</h3>
+          <blockquote id="baseline-answer" lang="en"></blockquote>
+          <p class="score" id="baseline-score"></p>
+        </article>
+        <article class="answer">
+          <h3>40% unstructured pruning</h3>
+          <blockquote id="pruned-answer" lang="en"></blockquote>
+          <p class="score loss" id="pruned-score"></p>
+        </article>
+      </div>
+      <details>
+        <summary>Bekijk de referentie</summary>
+        <p>Referentieantwoord: <span id="reference" lang="en"></span>.</p>
+      </details>
+    </section>
+
+    <section id="onderzoek" aria-labelledby="method-heading">
+      <h2 id="method-heading">Hoe ik dit heb onderzocht</h2>
+      <p class="section-note">Ik heb meetreeksen opgezet, modelantwoorden gescoord en getoetst hoe goed bekende meetpunten nieuwe pruningniveaus voorspellen.</p>
+      <div class="method-grid">
+        <article class="method">
+          <h3>Meten en schatten</h3>
+          <p>Voor iedere reeks gebruik ik dezelfde vragen en een eigen ongeprunde baseline. Antwoord-F1 meet woordoverlap op de beantwoordbare vragen. Tussen twee metingen schat ik de score met een rechte lijn.</p>
+        </article>
+        <article class="method">
+          <h3>Voorspelling toetsen</h3>
+          <p>Bij structured pruning op Qwen Base was de gemiddelde fout <strong>0,41 F1-punt</strong> op vijf vooraf voorspelde niveaus. Die toets geldt voor dit checkpoint en deze opzet. Voor een nieuw checkpoint moet ik de aanpak apart toetsen.</p>
+        </article>
+      </div>
+      <details>
+        <summary>Bronnen en scope</summary>
+        <p>De grafiek gebruikt een export van mijn structured onderzoek en de ontwikkelpilot. De unstructured reeksen zijn gemeten op dezelfde ontwikkelset. Het voorbeeldantwoord komt uit de pilot op 0% en 40%. De demo berekent tussenliggende waarden in de browser met de opgeslagen meetpunten.</p>
+      </details>
+    </section>
+  </main>
+  <footer><div class="wrap">Kashif Neil · Studio Responsible Applied AI · Hogeschool van Amsterdam</div></footer>
+
+  <script type="application/json" id="research-data">{"profiles":[{"name":"Qwen2.5-0.5B Base · structured","axis":"Verwijderde modelparameters","unit":"Aandeel van alle modelparameters. De ingreep verwijdert volledige FFN-kanalen.","protocol":"Structured pruning · 1.000 beantwoordbare passagevragen per niveau","start":1,"keyStep":0.1,"points":[[0,53.630279982173064,0],[0.6398539134958756,53.786753887011265,1],[1.2797078269917512,25.041791029328998,2],[1.906503497355058,28.66380996072026,3],[3.1862113243468095,16.94102581576164,5],[4.452860908205992,14.429488888276115,7],[6.35936440556105,14.414203079313134,10],[7.626013989420232,12.472025044359523,12],[9.53251748677529,10.55953550259158,15],[10.799167070634473,12.101039539071126,17],[12.70567056798953,8.468704697517532,20],[13.985378394981282,7.700064983480924,22],[15.87882364920377,8.516244539577327,25],[17.158531476195524,7.260176957321414,27],[19.06503497355058,5.835493173119312,30],[20.331684557409762,5.036129132173174,32],[22.23818805476482,7.166310959972795,35],[23.504837638624004,6.867905811078839,37],[25.41134113597906,7.819432980895276,40],[26.677990719838245,8.280776272660935,42],[28.584494217193303,7.393933846539919,45],[29.864202044185053,6.047797992881639,47],[31.75764729840754,5.486883680620236,50]]},{"name":"Qwen2.5-0.5B Base · unstructured","axis":"Gemaskeerde gewichten in de geselecteerde matrices","unit":"Aandeel gewichten per rij dat op nul is gezet in de geselecteerde matrices.","protocol":"Magnitude pruning · 100 beantwoordbare passagevragen per niveau","start":21,"keyStep":1,"points":[[0,53.839442351050494],[2,54.836473318849265],[4,56.28368460725838],[6,55.46368005041171],[8,48.786155747864534],[10,37.33446018814838],[12,29.175278812851545],[14,23.485930003438344],[16,20.04370263665755],[18,23.31837340829588],[20,27.675328833416952],[22,18.1000422087242],[24,17.412560295185358],[26,16.916929513021895],[28,16.66285476000886],[30,16.3875924331573],[32,14.013152756200226],[34,13.216067148129337],[36,9.509892685501669],[38,9.715641663819147],[40,5.68900999383758]]},{"name":"Pythia-410M · unstructured","axis":"Gemaskeerde gewichten in de geselecteerde matrices","unit":"Aandeel gewichten per rij dat op nul is gezet in de geselecteerde matrices.","protocol":"Magnitude pruning · 100 beantwoordbare passagevragen per niveau","start":21,"keyStep":1,"points":[[0,11.273499578566133],[2,11.555328006939185],[4,12.775911770949802],[6,11.860318877703241],[8,11.160506521760263],[10,11.475228175334413],[12,9.428724445117332],[14,9.35388354409096],[16,8.88189543985788],[18,7.642995451849267],[20,6.080512359394443],[22,6.366894008162012],[24,5.871117270821548],[26,6.62541703910125],[28,4.84959776005181],[30,3.8514526319614486],[32,3.8048263681996355],[34,2.8427919139683846],[36,3.3972463272308477],[38,1.6114956363240114],[40,1.5704945054945054]]},{"name":"SmolLM2-360M Base · unstructured","axis":"Gemaskeerde gewichten in de geselecteerde matrices","unit":"Aandeel gewichten per rij dat op nul is gezet in de geselecteerde matrices.","protocol":"Magnitude pruning · 100 beantwoordbare passagevragen per niveau","start":21,"keyStep":1,"points":[[0,9.732381543564744],[2,9.930478497761444],[4,9.558441154451941],[6,10.27017519716739],[8,11.568631026951937],[10,11.182537214185484],[12,9.476115985289495],[14,9.801189421522576],[16,9.181993793038348],[18,10.244569825213249],[20,9.709680698047908],[22,9.248083046503655],[24,7.415142696850867],[26,6.573410807944392],[28,5.36907056327907],[30,9.531578978396855],[32,8.821589467202605],[34,4.677426610346923],[36,5.428222735740463],[38,5.658101417584524],[40,4.126653752612832]]}],"example":{"question":"When was the cabinet-level Energy Department created?","reference":"1977","baseline":{"prediction":"1977","f1":100.0},"pruned":{"prediction":"To the National Energy Act of 1978","f1":0.0}}}</script>
+  <script>
+    'use strict';
+    const research = JSON.parse(document.getElementById('research-data').textContent);
+    const element = (id) => document.getElementById(id);
+    const number = new Intl.NumberFormat('nl-NL', { maximumFractionDigits: 2 });
+    const format = (value) => number.format(value);
+    const percent = (value) => format(value) + '%';
+    const menu = element('profile');
+    const slider = element('level');
+    const pruningDurationMs = 4500;
+    const chart = element('chart');
+    const scene = element('pruning-scene');
+    const play = element('play');
+    const rotation = element('rotation');
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const motion = {
+      structured: true, count: 0, progress: 0, playing: false, spinning: true,
+      visible: typeof IntersectionObserver === 'undefined', angle: 0, frame: 0, previous: null
+    };
+
+    // The same layout as the team preview: a projected sphere or a tilted weight matrix.
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+    const neurons = Array.from({ length: 60 }, (_, index) => {
+      const height = 1 - 2 * (index + .5) / 60;
+      const radius = 86 * Math.sqrt(1 - height * height);
+      return {
+        x: radius * Math.cos(index * goldenAngle), y: 86 * height,
+        z: radius * Math.sin(index * goldenAngle), rank: (index * 17 + 9) % 60, index
+      };
+    });
+    const weights = Array.from({ length: 100 }, (_, index) => ({
+      x: 16 + index % 10 * 33, y: 12 + Math.floor(index / 10) * 17, rank: (index * 37 + 21) % 100
+    }));
+    const rows = [-64, -32, 0, 32, 64];
+
+    function estimate(points, level, column = 1) {
+      const match = points.find((point) => Math.abs(point[0] - level) < 1e-8);
+      if (match) return { value: match[column], measured: true };
+      const right = points.findIndex((point) => point[0] > level);
+      const x0 = points[right - 1][0];
+      const x1 = points[right][0];
+      const y0 = points[right - 1][column];
+      const y1 = points[right][column];
+      return { value: y0 + (y1 - y0) * (level - x0) / (x1 - x0), measured: false, lower: x0, upper: x1 };
+    }
+
+    function svg(tag, attributes = {}, label) {
+      const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+      for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
+      if (label !== undefined) node.textContent = label;
+      return node;
+    }
+
+    function fade(rank) {
+      if (rank >= motion.count) return 0;
+      const start = .12 + .64 * rank / Math.max(1, motion.count - 1);
+      const time = Math.min(1, Math.max(0, (motion.progress - start) / .22));
+      return time * time * (3 - 2 * time);
+    }
+
+    function drawNetwork() {
+      const cos = Math.cos(motion.angle);
+      const sin = Math.sin(motion.angle);
+      function project(x, y, z) {
+        const depth = z * cos - x * sin;
+        const scale = 520 / (520 - depth);
+        return { x: 320 + (x * cos + z * sin) * scale, y: 132 + y * scale, scale, depth };
+      }
+      const inputs = rows.map(y => ({ x: 113, y: 132 + y, scale: 1 }));
+      const outputs = rows.map(y => ({ x: 527, y: 132 + y, scale: 1 }));
+      const center = neurons.map(n => ({ ...n, ...project(n.x, n.y, n.z) }))
+        .sort((a, b) => a.depth - b.depth);
+      const network = svg('g');
+      const nodes = svg('g');
+      for (const n of center) {
+        const input = inputs[n.index % inputs.length];
+        const output = outputs[(n.index * 3) % outputs.length];
+        const selected = n.rank < motion.count && motion.progress > 0;
+        const color = selected ? 'var(--amber)' : 'var(--accent)';
+        const opacity = 1 - fade(n.rank);
+        network.append(svg('path', {
+          d: 'M' + input.x + ' ' + input.y + 'Q222 ' + (input.y + n.y) / 2 + ' ' + n.x + ' ' + n.y
+            + 'Q418 ' + (output.y + n.y) / 2 + ' ' + output.x + ' ' + output.y,
+          fill: 'none', stroke: color, opacity: opacity * (selected ? .52 : .24)
+        }));
+        nodes.append(svg('circle', {
+          cx: n.x, cy: n.y, r: 4.3 * n.scale, fill: color, opacity: opacity * (.78 + n.depth / 400)
+        }));
+      }
+      for (const n of [...inputs, ...outputs]) {
+        network.append(svg('circle', { cx: n.x, cy: n.y, r: 5 * n.scale, fill: 'var(--accent)' }));
+      }
+      network.append(nodes);
+      return network;
+    }
+
+    function drawWeights() {
+      const grid = svg('g', { transform: 'matrix(1.02 .17 -.48 .87 189 24)' });
+      grid.append(svg('rect', { width: 346, height: 185, rx: 12, fill: 'var(--panel)', stroke: 'var(--line)' }));
+      for (const { x, y, rank } of weights) {
+        const selected = rank < motion.count && motion.progress > 0;
+        const opacity = 1 - fade(rank);
+        const box = { x, y, width: 23, height: 10, rx: 2 };
+        grid.append(
+          svg('rect', { ...box, fill: 'var(--line)' }),
+          svg('rect', { ...box, fill: selected ? 'var(--amber)' : 'var(--accent)', opacity: opacity * (.44 + .48 * rank / weights.length) })
+        );
+      }
+      return grid;
+    }
+
+    function drawScene() {
+      scene.replaceChildren(svg('title', { id: 'scene-title' }, motion.structured
+        ? 'Schematische weergave van 60 FFN-kanalen' : 'Schematische weergave van 100 gewichten'),
+        motion.structured ? drawNetwork() : drawWeights());
+    }
+
+    function updateMotionControls() {
+      if (motion.playing) {
+        play.textContent = 'Pauzeer pruning';
+      } else if (motion.progress === 1) {
+        play.textContent = 'Opnieuw afspelen';
+      } else {
+        play.textContent = motion.progress ? 'Hervat pruning' : 'Speel pruning af';
+      }
+      rotation.hidden = !motion.structured || reducedMotion.matches;
+      rotation.textContent = motion.spinning ? 'Pauzeer rotatie' : 'Hervat rotatie';
+      play.disabled = motion.count === 0;
+    }
+
+    function scheduleMotion() {
+      const active = motion.visible && !document.hidden
+        && (motion.playing || (motion.structured && motion.spinning && !reducedMotion.matches));
+      if (active) {
+        if (!motion.frame) motion.frame = requestAnimationFrame(animate);
+      } else {
+        cancelAnimationFrame(motion.frame);
+        motion.frame = 0;
+        motion.previous = null;
+      }
+    }
+
+    function animate(time) {
+      motion.frame = 0;
+      motion.previous ??= time;
+      const elapsed = time - motion.previous;
+      if (elapsed >= 30) {
+        const step = Math.min(elapsed, 80);
+        motion.previous = time;
+        if (motion.structured && (reducedMotion.matches ? motion.playing : motion.spinning)) {
+          motion.angle = (motion.angle + step * .0009) % (2 * Math.PI);
+        }
+        if (motion.playing) {
+          motion.progress = Math.min(1, motion.progress + step / pruningDurationMs);
+          if (motion.progress === 1) {
+            motion.playing = false;
+            updateMotionControls();
+          }
+        }
+        drawScene();
+      }
+      scheduleMotion();
+    }
+
+    function syncScene(profile, level) {
+      motion.playing = false;
+      motion.progress = 0;
+      motion.structured = profile.points[0].length === 3;
+      const amount = motion.structured ? estimate(profile.points, level, 2).value : level;
+      motion.count = Math.round(amount / 100 * (motion.structured ? neurons.length : weights.length));
+      const description = motion.structured ? 'FFN-kanalen verwijderen' : 'Gewichten op nul zetten';
+      element('motion-description').textContent = 'Schematische weergave. ' + description + ' bij ' + percent(level)
+        + (motion.structured ? ' van alle modelparameters.' : ' in de geselecteerde matrices.');
+      updateMotionControls();
+      drawScene();
+      scheduleMotion();
+    }
+
+    play.addEventListener('click', () => {
+      if (motion.progress === 1) motion.progress = 0;
+      motion.playing = !motion.playing;
+      updateMotionControls();
+      scheduleMotion();
+    });
+
+    rotation.addEventListener('click', () => {
+      motion.spinning = !motion.spinning;
+      updateMotionControls();
+      scheduleMotion();
+    });
+
+    reducedMotion.addEventListener('change', () => {
+      if (reducedMotion.matches) {
+        motion.angle = 0;
+        if (motion.playing) motion.progress = 1;
+        motion.playing = false;
+      }
+      updateMotionControls();
+      drawScene();
+      scheduleMotion();
+    });
+
+    document.addEventListener('visibilitychange', scheduleMotion);
+    if (typeof IntersectionObserver !== 'undefined') {
+      const observer = new IntersectionObserver(([entry]) => {
+        motion.visible = entry.isIntersecting;
+        scheduleMotion();
+      });
+      observer.observe(scene);
+    }
+
+    function draw(profile, level, f1) {
+      const points = profile.points;
+      const maximum = points.at(-1)[0];
+      const upper = Math.max(10, Math.ceil(Math.max(...points.map((point) => point[1])) / 10) * 10);
+      const x = (n) => 58 + n / maximum * 553;
+      const y = (n) => 225 - n / upper * 183;
+      const label = { fill: 'var(--muted)', 'font-size': 14 };
+      const title = svg('title', { id: 'chart-title' },
+        'Antwoord-F1, ' + profile.name + '. Bij ' + percent(level) + ': ' + format(f1) + '.');
+      chart.replaceChildren(title);
+      for (let i = 0; i <= 4; i += 1) {
+        const tick = upper * i / 4;
+        chart.append(
+          svg('line', { x1: 58, x2: 611, y1: y(tick), y2: y(tick), stroke: 'var(--line)' }),
+          svg('text', { ...label, x: 48, y: y(tick) + 5, 'text-anchor': 'end' }, format(tick))
+        );
+        const step = maximum * i / 4;
+        chart.append(svg('text', { ...label, x: x(step), y: 248, 'text-anchor': 'middle' }, percent(step)));
+      }
+      chart.append(
+        svg('text', { ...label, x: 58, y: 23 }, 'Antwoord-F1'),
+        svg('text', { ...label, x: 336, y: 274, 'text-anchor': 'middle' }, profile.axis),
+        svg('polyline', {
+          points: points.map(([a, b]) => x(a) + ',' + y(b)).join(' '),
+          fill: 'none', stroke: 'var(--accent)', 'stroke-width': 2, 'stroke-dasharray': '4 5'
+        })
+      );
+      for (const [a, b] of points) {
+        const dot = svg('circle', { cx: x(a), cy: y(b), r: 3, fill: 'var(--panel)', stroke: 'var(--accent)', 'stroke-width': 2 });
+        dot.append(svg('title', {}, percent(a) + ' · gemeten F1 ' + format(b)));
+        chart.append(dot);
+      }
+      chart.append(
+        svg('line', { x1: x(level), x2: x(level), y1: 42, y2: 225, stroke: 'var(--amber)', opacity: .46 }),
+        svg('circle', { cx: x(level), cy: y(f1), r: 6, fill: 'var(--amber)', stroke: 'var(--panel)', 'stroke-width': 2 })
+      );
+    }
+
+    function render() {
+      const profile = research.profiles[menu.selectedIndex];
+      const level = Number(slider.value);
+      const result = estimate(profile.points, level);
+      const baseline = profile.points[0][1];
+      const loss = baseline - result.value;
+      element('percentage').value = percent(level);
+      slider.setAttribute('aria-valuetext', percent(level));
+      element('source').textContent = result.measured ? 'Gemeten resultaat' : 'Geschat resultaat';
+      element('loss').textContent = Math.abs(loss) < 1e-8 ? '0 F1-punt verschil'
+        : format(Math.abs(loss)) + ' F1-punt ' + (loss > 0 ? 'verlies' : 'winst');
+      element('scores').textContent = format(baseline) + ' F1 ongeprund · ' + format(result.value) + ' F1 bij jouw keuze';
+      element('basis').textContent = result.measured ? 'Opgeslagen score op dit niveau.'
+        : 'Schatting tussen ' + percent(result.lower) + ' en ' + percent(result.upper) + '.';
+      draw(profile, level, result.value);
+      syncScene(profile, level);
+    }
+
+    function selectProfile() {
+      const profile = research.profiles[menu.selectedIndex];
+      slider.max = profile.points.at(-1)[0];
+      slider.step = 'any';
+      slider.value = profile.start;
+      element('maximum').textContent = percent(Number(slider.max));
+      element('protocol').textContent = profile.protocol;
+      element('unit').textContent = profile.unit;
+      render();
+    }
+
+    for (const item of research.profiles) {
+      const option = document.createElement('option');
+      option.textContent = item.name;
+      menu.append(option);
+    }
+    menu.addEventListener('change', selectProfile);
+    slider.addEventListener('input', () => {
+      const maximum = Number(slider.max);
+      slider.value = Math.min(maximum, Math.round(Number(slider.value) * 10) / 10);
+      render();
+    });
+    element('snap').addEventListener('click', () => {
+      const level = Number(slider.value);
+      const points = research.profiles[menu.selectedIndex].points;
+      const closest = points.reduce((best, point) => Math.abs(point[0] - level) < Math.abs(best[0] - level) ? point : best);
+      slider.value = closest[0];
+      render();
+    });
+    slider.addEventListener('keydown', (event) => {
+      const direction = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[event.key];
+      if (!direction) return;
+      event.preventDefault();
+      const step = research.profiles[menu.selectedIndex].keyStep;
+      slider.value = Math.min(Number(slider.max), Math.max(0, Math.round((Number(slider.value) + direction * step) * 10) / 10));
+      render();
+    });
+
+    const example = research.example;
+    element('example-question').textContent = example.question;
+    element('reference').textContent = example.reference;
+    element('baseline-answer').textContent = example.baseline.prediction;
+    element('pruned-answer').textContent = example.pruned.prediction;
+    element('baseline-score').textContent = format(example.baseline.f1) + ' F1';
+    element('pruned-score').textContent = format(example.pruned.f1) + ' F1';
+    selectProfile();
+  </script>
+</body>
+</html>
